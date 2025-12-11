@@ -1,4 +1,4 @@
-# some params are needed to work but are not really used in testing
+# CSF-enabled DarkIR config for LOLBlur evaluation/training
 #### datasets
 datasets:
   name: LOLBlur
@@ -11,7 +11,7 @@ datasets:
 
 #### network structures
 network:
-  name: DarkIR
+  name: DarkIR-CSF
   resume_training: True
   img_channels: 3
   width: 32
@@ -21,11 +21,11 @@ network:
   dec_blk_nums: [3, 1, 1]
   dilations: [1, 4, 9]
   extra_depth_wise: True
-  use_csf: False            # match training config
-  csf_reduction: 4
+  use_csf: true          # enable cross-scale fusion
+  csf_reduction: 4       # gating MLP reduction ratio
 
 #### model weights
 save:
-  path: ./models/DarkIR_lolblur_original_best.pt   # trained locally
+  path: ./models/DarkIR_lolblur_best.pt
 
 Resize: False

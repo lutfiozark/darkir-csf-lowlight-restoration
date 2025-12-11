@@ -8,6 +8,31 @@ except:
     from archs.arch_model import EBlock, DBlock
     from .arch_util import CustomSequential
 
+
+class CSFBlock(nn.Module):
+    """
+    Cross-Scale Fusion block. Learns a per-channel gate to balance encoder and decoder features.
+    """
+    def __init__(self, channels: int, reduction: int = 4):
+        super().__init__()
+        hidden = max(channels // reduction, 1)
+        self.fuse = nn.Sequential(
+            nn.Conv2d(channels * 2, channels, kernel_size=1, bias=True),
+            nn.ReLU(inplace=True),
+        )
+        self.gate = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(channels, hidden, kernel_size=1, bias=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(hidden, channels, kernel_size=1, bias=True),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, enc_feat, dec_feat):
+        summary = self.fuse(torch.cat([enc_feat, dec_feat], dim=1))
+        gate = self.gate(summary)
+        return gate * enc_feat + (1 - gate) * dec_feat
+
 class DarkIR(nn.Module):
     
     def __init__(self, img_channel=3, 
@@ -17,7 +42,9 @@ class DarkIR(nn.Module):
                  enc_blk_nums=[1, 2, 3], 
                  dec_blk_nums=[3, 1, 1],  
                  dilations = [1, 4, 9], 
-                 extra_depth_wise = True):
+                 extra_depth_wise = True,
+                 use_csf: bool = False,
+                 csf_reduction: int = 4):
         super(DarkIR, self).__init__()
         
         self.intro = nn.Conv2d(in_channels=img_channel, out_channels=width, kernel_size=3, padding=1, stride=1, groups=1,
@@ -30,6 +57,8 @@ class DarkIR(nn.Module):
         self.middle_blks = nn.ModuleList()
         self.ups = nn.ModuleList()
         self.downs = nn.ModuleList()
+        self.use_csf = use_csf
+        self.csf_blocks = nn.ModuleList() if use_csf else None
         
         chan = width
         for num in enc_blk_nums:
@@ -60,6 +89,8 @@ class DarkIR(nn.Module):
                 )
             )
             chan = chan // 2
+            if self.use_csf:
+                self.csf_blocks.append(CSFBlock(chan, reduction=csf_reduction))
             self.decoders.append(
                 CustomSequential(
                     *[DBlock(chan, dilations=dilations, extra_depth_wise=extra_depth_wise) for _ in range(num)]
@@ -93,10 +124,16 @@ class DarkIR(nn.Module):
         x = self.middle_blks_dec(x_light)
         x = x + x_light
 
-        for decoder, up, skip in zip(self.decoders, self.ups, skips[::-1]):
-            x = up(x)
-            x = x + skip
-            x = decoder(x)
+        if self.use_csf:
+            for decoder, up, skip, csf in zip(self.decoders, self.ups, skips[::-1], self.csf_blocks):
+                x = up(x)
+                x = csf(skip, x)
+                x = decoder(x)
+        else:
+            for decoder, up, skip in zip(self.decoders, self.ups, skips[::-1]):
+                x = up(x)
+                x = x + skip
+                x = decoder(x)
 
         x = self.ending(x)
         x = x + input
@@ -112,6 +149,31 @@ class DarkIR(nn.Module):
         mod_pad_w = (self.padder_size - w % self.padder_size) % self.padder_size
         x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h), value = 0)
         return x      
+
+
+class DarkIRCSF(DarkIR):
+    """
+    Cross-Scale Fusion variant of DarkIR. Keeps encoder/decoder blocks but replaces skip merges with CSF.
+    """
+    def __init__(self, img_channel=3, 
+                 width=32, 
+                 middle_blk_num_enc=2,
+                 middle_blk_num_dec=2, 
+                 enc_blk_nums=[1, 2, 3], 
+                 dec_blk_nums=[3, 1, 1],  
+                 dilations = [1, 4, 9], 
+                 extra_depth_wise = True,
+                 csf_reduction: int = 4):
+        super().__init__(img_channel=img_channel, 
+                         width=width, 
+                         middle_blk_num_enc=middle_blk_num_enc,
+                         middle_blk_num_dec=middle_blk_num_dec, 
+                         enc_blk_nums=enc_blk_nums, 
+                         dec_blk_nums=dec_blk_nums,  
+                         dilations=dilations, 
+                         extra_depth_wise=extra_depth_wise,
+                         use_csf=True,
+                         csf_reduction=csf_reduction)
 
 if __name__ == '__main__':
     

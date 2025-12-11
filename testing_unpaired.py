@@ -42,16 +42,11 @@ def pad_tensor(tensor, multiple = 8):
     return tensor
 
 def load_model(rank, model, path_weights):
-    map_location = 'cpu'
-    checkpoints = torch.load(path_weights, map_location='cpu', weights_only=False)
-   
-    weights = checkpoints['params']
-    weights = {'module.' + key: value for key, value in weights.items()}
-
-
     macs, params = get_model_complexity_info(model, (3, 256, 256), print_per_layer_stat=False, verbose=False)
     print(macs, params)
-    model.load_state_dict(weights)
+
+    model = load_checkpoint(model, path_weights, map_location='cpu')
+    print(f'Loaded weights from {path_weights}')
     return model
 
 def create_losses(list_of_losses = ['musiq', 'niqe', 'nrqm', 'brisque'], rank=0):
@@ -80,7 +75,9 @@ def eval_unpaired(rank, world_size):
 
     metrics = {name: 0. for name in names}
     model.eval()
-    for element, _ in test_loader:
+    save_dir = opt['save'].get('results_dir', './images/results_unpaired')
+    max_save = 8
+    for idx, (element, _) in enumerate(test_loader):
 
         ind_metric = {name: None for name in names}
         element = element.to(rank)
@@ -107,6 +104,12 @@ def eval_unpaired(rank, world_size):
         result = result[:, :, :H, :W]
         
         result = torch.clamp(result, 0., 1.)
+
+        if rank == 0 and idx < max_save:
+            os.makedirs(save_dir, exist_ok=True)
+            to_pil = transforms.ToPILImage()
+            to_pil(element.cpu()[0]).save(os.path.join(save_dir, f"{idx:05d}_input.png"))
+            to_pil(result.cpu()[0]).save(os.path.join(save_dir, f"{idx:05d}_output.png"))
         
         for name, loss in losses.items():
             ind_metric[name] = loss[name](result)

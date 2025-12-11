@@ -33,6 +33,9 @@ metrics.sh
 /options/test/exdark.yml
 /data/datasets/*
 
+# local env
+.venv/
+
 # Comment the next lines if train is uploaded
 train.py
 computing_test.py

@@ -3,7 +3,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.nn.parallel import DistributedDataParallel as DDP
 from ptflops import get_model_complexity_info
 
-from .DarkIR import DarkIR   
+from .DarkIR import DarkIR, DarkIRCSF   
 
 def create_model(opt, rank, adapter = False):
     '''
@@ -12,6 +12,9 @@ def create_model(opt, rank, adapter = False):
     '''
     name = opt['name']
 
+    name_lower = name.lower()
+    use_csf = opt.get('use_csf', name_lower in ['darkir-csf', 'darkir_csf', 'darkircsf'])
+    csf_reduction = opt.get('csf_reduction', 4)
 
     model = DarkIR(img_channel=opt['img_channels'], 
                     width=opt['width'], 
@@ -20,7 +23,9 @@ def create_model(opt, rank, adapter = False):
                     enc_blk_nums=opt['enc_blk_nums'],
                     dec_blk_nums=opt['dec_blk_nums'], 
                     dilations=opt['dilations'],
-                    extra_depth_wise=opt['extra_depth_wise'])
+                    extra_depth_wise=opt['extra_depth_wise'],
+                    use_csf=use_csf,
+                    csf_reduction=csf_reduction)
 
     if rank ==0:
         print(f'Using {name} network')
